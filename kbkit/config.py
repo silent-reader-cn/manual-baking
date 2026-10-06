@@ -20,14 +20,35 @@ DEFAULTS = {
     "tocFile": "_source/_toc.json",
     "filesFile": "_source/_files.json",
     "indexFileName": "_INDEX.md",
+    # 只有带这个标记的索引才由本工具包生成。自检里「叶子索引条数 == 目录文件数」
+    # 这条**只对本工具生成的索引成立** —— 有些语料的 _INDEX.md 是内容清单
+    # （例：kingdee 的模块索引列 228 张表，跨 72 个文件），按文件数比会误报。
+    "indexBanner": "<!-- 由 scripts/build_index.py 从 Markdown 自动生成，请勿手工编辑 -->",
 
     # 一条记录 = 一篇文章（page）；表格型内容可设为 heading（一条记录 = 一个标题块）
     "recordGranularity": "page",
     "headingRecordLevel": 2,            # recordGranularity=heading 时，按几级标题切块
+    # heading 粒度下，没有该级标题的文件直接跳过（通常是模块清单/占位文件）；
+    # 首个标题之前的引言是否单独成一条记录
+    "headingSkipFilesWithoutHeading": True,
+    "headingIncludeIntro": False,
+
+    # 相对 references/ 的排除模式（fnmatch）。_source/ 放原始响应，不该进语料。
+    "excludeGlobs": ["**/_source/**", "_source/**"],
 
     "blocks": [
         {"dir": "01_docs", "name": "文档", "alias": "docs", "prefix": "/"}
     ],
+    # 块定义里还可选带这些键（不写则用全局值）：
+    #   granularity        "page" | "heading" —— 同一知识库里不同块粒度常常不同
+    #                      例：kingdee 的「数据库」块按 `##` 切表，「OpenAPI 手册」块按篇
+    #   headingLevel       该块的标题级别
+    #   headingPattern     该块的自定义切分正则（**捕获组 1 = 标题**），优先于 headingLevel。
+    #                      真实语料常需要它：只切编号小节、或 3/4 级混用
+    #                      （weaver 的 JSAPI 用 `^#{3,4}\s+(\d+\.\d+[^\n]*)$`）
+    #   pathDepth          恒定层级（如对象接口固定「模块/对象」两级）
+    #   segmentNameMap     {"模块/对象": "中文名"}，给 pathDepth 用
+    #   breadcrumbKeys     ["module","object"]，把面包屑写进 frontmatter 的哪些键
 
     "frontmatter": ["title", "path", "url", "block", "category", "updatedAt"],
 
@@ -138,8 +159,12 @@ class Config:
         self.toc_file = os.path.join(root, data["tocFile"])
         self.files_file = os.path.join(root, data["filesFile"])
         self.index_file_name = data["indexFileName"]
+        self.index_banner = data["indexBanner"]
         self.record_granularity = data["recordGranularity"]
         self.heading_record_level = int(data["headingRecordLevel"])
+        self.heading_skip_files_without_heading = bool(data["headingSkipFilesWithoutHeading"])
+        self.heading_include_intro = bool(data["headingIncludeIntro"])
+        self.exclude_globs = list(data.get("excludeGlobs") or [])
         self.blocks = data["blocks"]
         self.frontmatter = data["frontmatter"]
         self.ranking = data["ranking"]

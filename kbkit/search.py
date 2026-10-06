@@ -26,6 +26,30 @@ from . import corpus as corpus_mod
 
 # ---------------------------------------------------------------- 打分
 
+TITLE_SPLIT_RE = re.compile(r"[\s/|,，、·]+")
+
+
+def title_tokens(title):
+    """标题切成词元集合。表格型记录常写成「中文名 t_xxx」，这样 t_xxx 才算一个词元。"""
+    return {t for t in TITLE_SPLIT_RE.split(title or "") if t}
+
+
+def is_exact_match(rec, kw):
+    """
+    --exact 的判定：标题整体相等，**或**关键词是标题里的一个独立词元（忽略大小写）。
+
+    只比整体相等不够用：`## 辅助生产分配-主表 t_aca_auxprodalloc` 这种标题里，
+    使用者会直接敲表名 `t_aca_auxprodalloc`。
+    """
+    kw = (kw or "").strip().lower()
+    if not kw:
+        return False
+    title = (rec.title or "").strip()
+    if title.lower() == kw:
+        return True
+    return any(t.lower() == kw for t in title_tokens(title))
+
+
 def score(rec, kws, require_all, w):
     """
     返回 (分数, 命中词数, 各词命中次数)；不命中返回 None。
@@ -34,6 +58,7 @@ def score(rec, kws, require_all, w):
     cat = rec.category or ""
     path = rec.path or ""
     segs = set(path.strip("/").split("/"))
+    tokens_lower = {t.lower() for t in title_tokens(title)}
 
     counts = []
     for kw in kws:
@@ -48,7 +73,7 @@ def score(rec, kws, require_all, w):
 
     s = 0
     for kw in kws:
-        if title == kw:
+        if title == kw or kw.lower() in tokens_lower:
             s += w["titleExact"]
         elif title.startswith(kw):
             s += w["titlePrefix"]
@@ -93,7 +118,7 @@ def run(cfg, keywords, scopes=None, category="", require_all=False,
         if not kws:
             out.append((0, rec))
             continue
-        if exact_name and rec.title.strip().lower() != kws[0].strip().lower():
+        if exact_name and not is_exact_match(rec, kws[0]):
             continue
         head = rec.searchable_head(cfg)
         hay = rec.body + "\n" + head

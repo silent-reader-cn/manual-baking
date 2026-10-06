@@ -69,11 +69,28 @@ class Record:
 
     @property
     def title(self):
-        return self.heading or self.meta.get("title", "")
+        """
+        标题：heading 粒度用块标题；否则 frontmatter.title；**都没有则回退文件名**。
+
+        回退很重要：结构化导出类语料常有文件没写 frontmatter，
+        标题为空会让这条记录完全无法按名称检索。
+        """
+        if self.heading:
+            return self.heading
+        t = self.meta.get("title")
+        if t:
+            return t
+        return os.path.splitext(os.path.basename(self.rel or ""))[0]
 
     @property
     def category(self):
-        return self.meta.get("category", "")
+        """
+        分类：优先取 frontmatter 的 category，**没有则回退到目录路径**。
+
+        结构化导出类语料（如数据字典）通常没有 frontmatter，分类信息只存在于
+        目录结构里；不回退的话 `--category` 会全部落空。
+        """
+        return self.meta.get("category") or self.category_path
 
     @property
     def path(self):
@@ -88,22 +105,42 @@ class Record:
         return "\n".join(p for p in parts if p)
 
 
-def split_by_heading(body, level):
+def split_by_heading(body, level=None, include_intro=False, pattern=None):
     """
-    按 N 级标题把正文切成块，返回 [(标题文本, 块正文)]。
-    标题前的引言会作为「(概述)」块保留，不丢内容。
+    按标题把正文切成块，返回 [(标题文本, 块正文)]。
+
+    pattern 给了就用它（**捕获组 1 = 标题**）；否则用 level 级标题。
+    pattern 这个逃生口是必需的：真实语料里常见「只切编号小节」或「3/4 级混用」，
+    如 weaver 的前端 JSAPI 用 `^#{3,4}\\s+(\\d+\\.\\d+...)` —— 固定级别表达不了。
+
+    没有匹配到标题时返回空列表 —— 调用方通常应据此**跳过整个文件**
+    （模块清单、占位文件都属于这种）。include_intro 为真时，首个标题之前的
+    引言会作为 (None, …) 一条保留。
     """
-    pat = re.compile(r"^(#{%d})\s+(.*)$" % level, re.M)
+    # 自定义 pattern 也要带 re.M —— 否则 `^`/`$` 只在全文首尾生效，
+    # 行锚定的标题正则一个都匹配不到（实测踩过：整个块变成 0 条记录）。
+    # 需要别的语义就用内联标志覆盖，如 `(?-m)`。
+    pat = (re.compile(pattern, re.M) if pattern
+           else re.compile(r"^(?:#{%d})\s+(.*)$" % int(level), re.M))
     marks = list(pat.finditer(body))
     if not marks:
-        return [(None, body)]
+        return []
     out = []
-    if marks[0].start() > 0 and body[: marks[0].start()].strip():
+    if include_intro and marks[0].start() > 0 and body[: marks[0].start()].strip():
         out.append((None, body[: marks[0].start()]))
     for i, m in enumerate(marks):
         end = marks[i + 1].start() if i + 1 < len(marks) else len(body)
-        out.append((m.group(2).strip(), body[m.start():end]))
+        out.append((m.group(1).strip(), body[m.start():end]))
     return out
+
+
+def _excluded(rel_refs, globs):
+    """rel_refs 是相对 references/ 的正斜杠路径。"""
+    import fnmatch
+    for g in globs or ():
+        if fnmatch.fnmatch(rel_refs, g) or fnmatch.fnmatch(rel_refs, g.rstrip("/") + "/*"):
+            return True
+    return False
 
 
 def iter_records(cfg, scopes=None, category=None, include_index_files=False):
@@ -123,23 +160,42 @@ def iter_records(cfg, scopes=None, category=None, include_index_files=False):
         if block is None or (scopes and block not in scopes):
             continue
         alias = cfg.alias_of(block)
+        blk = cfg.dir_to_block.get(block, {})
+        # 块级粒度可覆盖全局 —— 同一知识库里不同块常常不同
+        # （kingdee：数据库块按 `##` 切表，OpenAPI 手册块按篇）
+        granularity = blk.get("granularity") or cfg.record_granularity
+        level = int(blk.get("headingLevel") or cfg.heading_record_level)
+        pattern = blk.get("headingPattern")
         for fn in sorted(files):
             if not fn.endswith(".md"):
                 continue
             if fn == cfg.index_file_name and not include_index_files:
                 continue
             full = os.path.join(dirpath, fn)
+            rel_refs = os.path.relpath(full, refs).replace("\\", "/")
+            if _excluded(rel_refs, cfg.exclude_globs):
+                continue
             try:
                 text = open(full, encoding="utf-8").read()
             except Exception:  # noqa: BLE001
                 continue
             meta, body = parse_frontmatter(text)
-            if category and category not in meta.get("category", ""):
-                continue
+            if category:
+                # 分类过滤要和 Record.category 用同一套口径（frontmatter 优先，目录兜底），
+                # 否则没有 frontmatter 的语料会把所有 --category 过滤掉
+                dir_cat = os.path.dirname(rel_refs).replace("\\", "/")
+                dir_cat = dir_cat.split("/", 1)[1] if "/" in dir_cat else ""
+                if category not in (meta.get("category") or dir_cat):
+                    continue
             rel = os.path.relpath(full, cfg.root).replace("\\", "/")
-            rel_refs = os.path.relpath(full, refs).replace("\\", "/")
-            if cfg.record_granularity == "heading":
-                for heading, chunk in split_by_heading(body, cfg.heading_record_level):
+            if granularity == "heading":
+                chunks = split_by_heading(body, level, cfg.heading_include_intro, pattern)
+                if not chunks:
+                    # 没有该级标题 → 模块清单 / 占位文件，默认整篇跳过
+                    if cfg.heading_skip_files_without_heading:
+                        continue
+                    chunks = [(None, body)]
+                for heading, chunk in chunks:
                     if not chunk.strip():
                         continue
                     m = dict(meta)

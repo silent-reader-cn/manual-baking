@@ -84,9 +84,20 @@ def check_a(cfg, records, online):
     else:
         skip("A1 三方条数一致", "缺 _toc.json 或 _files.json")
 
-    need = set(cfg.frontmatter)
-    bad = [r.rel for r in records if need - set(r.meta)]
-    check("A5 frontmatter 字段齐全", not bad,
+    # A5：查「每条记录都能拿到必需字段」，用 Record 的解析结果而非 raw frontmatter
+    #     （title/category 有文件名、目录等兜底，不该因为没写 frontmatter 就判失败）
+    need = list(cfg.frontmatter)
+
+    def effective(rec):
+        d = dict(rec.meta)
+        d.setdefault("title", rec.title)
+        d.setdefault("category", rec.category)
+        d.setdefault("path", rec.path)
+        return d
+
+    bad = [r.rel for r in records
+           if any(not effective(r).get(f) for f in need)]
+    check("A5 必需字段齐全（含兜底）", not bad,
           f"缺字段 {len(bad)} 条" + (f"，如 {bad[0]}" if bad else ""))
 
     block_tag = re.compile(
@@ -155,8 +166,14 @@ def check_b(cfg, records):
     print("=" * 70)
 
     # B1
-    target = max(records, key=lambda r: len(r.body))
-    out = _run_search(cfg, ["--path", target.path or target.rel])
+    #   用「唯一标识」去取，别用文件路径 —— heading 粒度下一个文件有多条记录，
+    #   --path <文件rel> 只会返回该文件的第一条，和抽样目标对不上（实测踩过）。
+    from collections import Counter
+    key_of = lambda r: r.path or r.title          # noqa: E731
+    key_freq = Counter(key_of(r) for r in records)
+    uniq = [r for r in records if key_of(r) and key_freq[key_of(r)] == 1]
+    target = max(uniq or records, key=lambda r: len(r.body))
+    out = _run_search(cfg, ["--path", key_of(target)])
     body_lines = [ln for ln in target.body.split("\n") if ln.strip()]
     missing = [ln for ln in body_lines if ln.strip() not in out]
     check("B1 --path 输出完整正文", not missing,
@@ -179,7 +196,11 @@ def check_b(cfg, records):
           f"{ma.groups() if ma else None} vs {mb.groups() if mb else None}")
 
     # B4
+    #   B4a 对所有 _INDEX.md 都查（链接可达是通用要求）；
+    #   B4b 只查**本工具生成**的索引 —— 有些语料的 _INDEX.md 是内容清单
+    #   （kingdee 的模块索引列 228 张表跨 72 个文件），按文件数比会误报。
     broken, leaf_mism = [], []
+    checked_b4b = 0
     for dirpath, _d, files in os.walk(cfg.references_dir):
         if cfg.index_file_name not in files:
             continue
@@ -189,42 +210,49 @@ def check_b(cfg, records):
         for link in re.findall(r"\]\(\./([^#]+?\.md)\)", text):
             if not os.path.exists(os.path.join(dirpath, link)):
                 broken.append((os.path.relpath(idx, cfg.root), link))
+        if cfg.index_banner not in text:
+            continue          # 不是本工具生成的索引，不比对条数
         actual = [f for f in files if f.endswith(".md") and f != cfg.index_file_name]
         if not actual:
-            continue      # 非叶子目录，条目指向子索引
+            continue          # 非叶子目录，条目指向子索引
         listed = [l for l in re.findall(r"\]\(\./([^#]+?\.md)\)", text)
                   if not l.endswith(cfg.index_file_name)]
+        checked_b4b += 1
         if len(listed) != len(actual):
             leaf_mism.append((os.path.relpath(idx, cfg.root), len(listed), len(actual)))
     check("B4a 索引内链接全部可达", not broken,
           f"{len(broken)} 条死链" + (f"，如 {broken[0]}" if broken else ""))
     check("B4b 叶子目录索引条数一致", not leaf_mism,
+          f"检查了 {checked_b4b} 个本工具生成的索引，"
           f"{len(leaf_mism)} 处不一致" + (f"，如 {leaf_mism[0]}" if leaf_mism else ""))
 
     # B5 用全库唯一的行做探针
-    from collections import Counter
+    #   ⚠️ 探针必须**按记录**归集，不能按文件 —— heading 粒度下一个文件有多条记录，
+    #      按文件归集会互相覆盖，导致探针取自别的记录（实测踩过）
     freq = Counter()
     per_rec = {}
-    for r in records:
+    for i, r in enumerate(records):
         ls = [ln for ln in corpus_mod.lines_outside_fence(r.body)
               if len(ln) >= 12 and not ln.startswith(("#", "|", ">", "*", "!"))]
-        per_rec[r.rel] = ls
+        per_rec[i] = ls
         for ln in set(ls):
             freq[ln] += 1
 
     ok_n = try_n = 0
     fails = []
-    for r in random.Random(20261006).sample(records, min(15, len(records))):
-        cands = [ln for ln in per_rec.get(r.rel, []) if freq[ln] == 1]
+    picks = random.Random(20261006).sample(range(len(records)), min(15, len(records)))
+    for i in picks:
+        rec = records[i]
+        cands = [ln for ln in per_rec.get(i, []) if freq[ln] == 1]
         if not cands:
             continue
         try_n += 1
         probe = cands[-1][:16]
         out = _run_search(cfg, [probe, "--limit", "400", "--brief"])
-        if r.title and r.title in out:
+        if rec.title and rec.title in out:
             ok_n += 1
         else:
-            fails.append((r.rel, probe))
+            fails.append((rec.rel, probe))
     check("B5 正文深处关键词可召回（全库唯一探针）",
           try_n > 0 and ok_n >= try_n * 0.8,
           f"{ok_n}/{try_n} 命中" + (f"，如 {fails[0]}" if fails else ""))

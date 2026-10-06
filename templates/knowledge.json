@@ -19,14 +19,26 @@
   "tocFile": "_source/_toc.json",
   "filesFile": "_source/_files.json",
 
-  // page    一条记录 = 一篇文章（文档型内容）
-  // heading 一条记录 = 一个标题块（表格型内容，如「一张表 = 一个 ## 块」）
+  // 记录粒度：
+  //   page    一条记录 = 一篇文章（文档型内容）
+  //   heading 一条记录 = 一个标题块（表格型内容，如「一张表 = 一个 ## 块」）
+  // 注意：**块级可以覆盖**（见下面 blocks 里的 granularity / headingLevel /
+  // headingPattern）—— 同一个知识库里不同块的粒度常常不同。
   "recordGranularity": "page",
   "headingRecordLevel": 2,
 
+  // 相对 references/ 的排除模式（fnmatch）。_source/ 放原始响应，不该进语料。
+  "excludeGlobs": ["**/_source/**", "_source/**"],
+
   // 块划分。alias 是检索时 --scope 用的短名。
-  // pathDepth + segmentNameMap 用于「层级固定」的站点（如对象接口恒定「模块/对象」两级，
-  // 且有些对象没登记在站点导航里，面包屑会少一级）。
+  // 每个块还可选带：
+  //   granularity     "page" | "heading"     覆盖全局粒度
+  //   headingLevel    该块的标题级别
+  //   headingPattern  该块的自定义切分正则（捕获组 1 = 标题），优先于 headingLevel
+  //                   —— 真实语料常需要它：只切编号小节、或 3/4 级混用
+  //   pathDepth       恒定层级（如对象接口固定「模块/对象」两级）
+  //   segmentNameMap  {"模块/对象": "中文名"}，给 pathDepth 用
+  //   breadcrumbKeys  ["module","object"]，把面包屑写进 frontmatter 的哪些键
   "blocks": [
     { "dir": "01_start", "name": "快速开始", "alias": "start", "prefix": "/start/" },
     { "dir": "02_api",   "name": "接口手册", "alias": "api",   "prefix": "/api/" }
