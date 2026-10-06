@@ -1,0 +1,83 @@
+{
+  // ============================================================================
+  // knowledge.json —— 唯一需要按站点改的文件
+  //
+  // 支持 // 行注释与尾注释（解析前会剥掉，不影响字符串里的 https://）。
+  // 所有字段都可省略，省略时用 kbkit/config.py 里的默认值。
+  // ============================================================================
+
+  "name": "my-knowledge-base",
+  "title": "某某文档知识库",
+  "source": "https://docs.example.com/",
+
+  // 站点类型：vuepress-ssg | static-html | spa-json | structured-export
+  // 先用 `python tools/siteprobe.py detect <首页URL>` 判一下，别猜。
+  "siteType": "vuepress-ssg",
+
+  "referencesDir": "references",
+  "sourceDir": "_source",
+  "tocFile": "_source/_toc.json",
+  "filesFile": "_source/_files.json",
+
+  // page    一条记录 = 一篇文章（文档型内容）
+  // heading 一条记录 = 一个标题块（表格型内容，如「一张表 = 一个 ## 块」）
+  "recordGranularity": "page",
+  "headingRecordLevel": 2,
+
+  // 块划分。alias 是检索时 --scope 用的短名。
+  // pathDepth + segmentNameMap 用于「层级固定」的站点（如对象接口恒定「模块/对象」两级，
+  // 且有些对象没登记在站点导航里，面包屑会少一级）。
+  "blocks": [
+    { "dir": "01_start", "name": "快速开始", "alias": "start", "prefix": "/start/" },
+    { "dir": "02_api",   "name": "接口手册", "alias": "api",   "prefix": "/api/" }
+  ],
+
+  // 每条记录必须有的 frontmatter 字段（自检 A5 会查）
+  "frontmatter": ["title", "path", "url", "block", "category", "updatedAt"],
+
+  // 分层加权。path 相关的两项**别删** —— 漏掉 path 会让「按标识符查」静默漏召回。
+  "ranking": {
+    "titleExact": 20000,
+    "titlePrefix": 5000,
+    "titleContains": 2000,
+    "categoryContains": 800,
+    "pathSegmentExact": 6000,
+    "pathContains": 1200,
+    "bodyPerHit": 10,
+    "titleHitWeight": 3
+  },
+
+  "search": { "defaultLimit": 20, "defaultMax": 1500, "snippetLeadRatio": 0.33 },
+
+  "fetch": {
+    "concurrency": 6,
+    "delay": 0.1,
+    "retries": 3,
+    "timeout": 40
+  },
+
+  // 站点 HTML 结构。默认值对应 VuePress 2 + Plume 主题。
+  // 换站点时先只改 contentMarker（正文容器的 class 特征），不够再改其它。
+  "html": {
+    "contentMarker": "vp-doc plume-content",
+
+    // ⚠️ 这些 token 必须**精确匹配 class**（按空格切分后比对），
+    //    用子串匹配会误伤正文容器 —— 实测把整篇正文丢光。
+    "dropClassTokens": [
+      "header-anchor", "line-numbers", "line-number", "copy-code-button",
+      "vp-copy", "external-link-icon", "outline-marker", "edit-link",
+      "last-updated", "prev-next"
+    ],
+
+    // ⚠️ 语言名可以为空（`class="language- line-numbers-mode"`），必须用 `*` 不是 `+`
+    "codeWrapperPattern": "\\blanguage-([A-Za-z0-9_+#-]*)",
+
+    "breadcrumbBlockPattern": "typeof=\"BreadcrumbList\".*?</ol>",
+    "breadcrumbNamePattern": "<meta property=\"name\" content=\"([^\"]*)\"",
+    "titlePattern": "<h1 class=\"vp-doc-title page-title\"[^>]*>(.*?)</h1>",
+    "datePattern": "class=\"create-time\"[^>]*>(.*?)</p>",
+    "dateValuePattern": ">\\s*(\\d{4}-\\d{2}-\\d{2})\\s*<",
+    "stripBreadcrumbRoot": "首页",
+    "normalizeHeadings": true
+  }
+}

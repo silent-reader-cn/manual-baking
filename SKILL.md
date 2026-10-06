@@ -1,6 +1,6 @@
 ---
 name: manual-baking
-description: 把在线文档手册（厂商知识库 / 产品文档站 / 社区专题）完整抓取并「烘焙」成可检索的本地知识库 Skill —— 先判别站点是 SPA 还是 SSG（决定是挖 JSON 接口还是直接解析 HTML）、零依赖转 Markdown、接入统一检索、用自检脚本证明没丢内容，最后拿真实凭据实测一遍并把与文档不符之处回写。当需要「抓取某手册/文档站全部内容」「把在线文档转成 markdown 知识库」「给 skill 增加全文检索」「扩充知识库的某个块」「给知识库补可运行示例」时使用。参考实现：weaver-e9-dev、kingdee-cosmic-dev、fxiaoke-dev（VuePress SSG + 实测回写）。
+description: 把在线文档手册（厂商知识库 / 产品文档站 / 社区专题）完整抓取并「烘焙」成可检索的本地知识库 Skill —— 先判别站点是 SPA 还是 SSG（决定是挖 JSON 接口还是直接解析 HTML）、零依赖转 Markdown、接入统一检索、用自检脚本证明没丢内容，最后拿真实凭据实测一遍并把与文档不符之处回写。**自带配置驱动的工具包 kbkit/**（侦察 / 抓取 / 转换 / 检索 / 索引 / 自检），一条命令脚手架出新知识库仓库，站点差异只改 knowledge.json。当需要「抓取某手册/文档站全部内容」「把在线文档转成 markdown 知识库」「给 skill 增加全文检索」「扩充知识库的某个块」「给知识库补可运行示例」「新建一个知识库 skill 仓库」时使用。参考实现：weaver-e9-dev、kingdee-cosmic-dev、fxiaoke-dev。
 agent_created: true
 ---
 
@@ -18,27 +18,113 @@ agent_created: true
 
 ---
 
+## 本仓库自带工具包 `kbkit/`（可以直接跑）
+
+上面几个仓库里，`fetch_manual / html2md / search / build_index / selftest` 原本各有一份
+**已经分叉的副本** —— 同样的架构、同样的 bug 被修了三四遍，站点差异却硬编码在代码里。
+`kbkit/` 把这些收敛成一套**配置驱动**的实现：**站点相关的东西全进 `knowledge.json`，
+代码不再改**。
+
+```
+kbkit/
+├── config.py       读 knowledge.json（支持 // 注释），块/别名/排序权重/HTML 选择器
+├── corpus.py       语料遍历 + frontmatter 解析（**所有模块共用**，避免解析漂移）
+├── html2md.py      通用 HTML → Markdown（选择器可配）
+├── search.py       分层加权检索（path 参与打分）
+├── build_index.py  从 Markdown 派生各级 _INDEX.md
+├── selftest.py     11 项完整性自检
+├── probe.py        站点侦察：判 SPA/SSG、从 app.js 提取路由与中文层级
+└── fetch.py        并发抓取 → 转换 → 串行定路径写盘
+```
+
+### 两种用法
+
+**① 起一个新知识库（推荐）** —— 一条命令把工具包 vendoring 进新仓库并渲染文档骨架：
+
+```bash
+python tools/kb_new.py ../my-kb \
+  --name my-kb --title "某某文档知识库" --source https://docs.example.com/ \
+  --blocks "/start/:01_start:快速开始:start,/api/:02_api:接口手册:api" \
+  --git
+```
+
+然后按它打印的六步走：`siteprobe detect` → `siteprobe routes` → `fetch_manual`
+→ `build_index` → `selftest`。**只有 `knowledge.json` 需要按站点改。**
+
+**② 接到已有知识库上** —— 把 `kbkit/` 与 `scripts/ tools/` 的封装复制进去，
+写一份 `knowledge.json` 描述现有语料，即可用通用版替换各仓库的分叉副本。
+
+### 它替你挡掉的坑（都是实测踩出来的）
+
+| 坑 | kbkit 的做法 |
+| :--- | :--- |
+| 丢弃节点的 class 用**子串**匹配 → 整篇正文被静默丢光 | 按 class **token** 精确比对 |
+| shiki 代码块语言名为空 → 围栏整块丢失 | 正则用 `*` 而非 `+`，并补 `data-highlighter` 兜底 |
+| 分类路径用相对**仓库根**的路径算 → 目录多套一层，索引翻倍 | `Record.category_path` 明确相对 `references/` |
+| 按标识符（apiName / 表名）查**静默漏召回** | `path` 参与预筛与打分，命中 URL 段给高权重 |
+| 自检的归一化两侧不对称 → 把「其实一致」判成「不一致」 | 源侧解码、md 侧不解码，两侧同一套 `norm()` |
+| 探针抽到跨页样板句 → 测的是排序不是召回 | 先建全库行频次表，只取**频次 == 1** 的行 |
+
+> **验证过**：用 `kbkit` 的通用脚本跑 fxiaoke-dev 的 1,307 篇真实语料，
+> 索引 **255 个文件路径与数据 254/255 完全一致**（唯一差异是顶层索引里的链接显示文字），
+> 检索结果与原专用脚本逐条一致，自检 11 项全过（含联网抽样 A2 文本保真 20/20）。
+
+---
+
 ## 0. 先定结构
 
 知识库按「块」组织，每块一个目录，检索脚本统一覆盖：
 
 ```
-references/
-├── _INDEX.md           总索引（各块概览 + 入口）
-├── <块一>/             _INDEX.md + 内容
-└── <块二>/
-    ├── _INDEX.md
-    └── _source/        原始响应存档（关键！见第 2 步）
-scripts/
-├── search.py           统一检索
-└── build_index.py      从 Markdown 派生所有 _INDEX.md
-tools/
-├── html2md.py          零依赖 HTML→Markdown
-├── fetch_manual.py     抓取
-└── selftest.py         完整性自检
+<知识库>/
+├── knowledge.json     站点配置（块/别名/排序权重/HTML 选择器）—— 唯一按站点改的文件
+├── kbkit/             通用工具包（可 vendoring 进本仓库）
+├── scripts/
+│   ├── search.py      统一检索
+│   └── build_index.py 从 Markdown 派生所有 _INDEX.md
+├── tools/
+│   ├── fetch_manual.py 抓取
+│   ├── selftest.py     完整性自检
+│   └── siteprobe.py    站点侦察（判 SPA/SSG、提路由）
+├── references/        语料（Markdown 是唯一真相源）
+│   ├── _INDEX.md      总索引（各块概览 + 入口）
+│   └── <块一>/         _INDEX.md + 内容
+└── _source/           路由清单 / 抓取清单 / 原始响应存档
 ```
 
 **Markdown 是唯一真相源**：索引和检索都从它派生，绝不手工维护索引。
+
+### 块怎么分（三个真实仓库的差异）
+
+「块」是检索的 `--scope` 单位，划分依据是**使用者找东西的心智模型**，不是文档站的目录树。
+实测三种典型：
+
+| 仓库 | 块划分 | 为什么这么分 |
+| :--- | :--- | :--- |
+| `kingdee-cosmic-dev` | 2 块：数据库 / OpenAPI 手册 | 两类内容形态完全不同（表定义 vs 接口文档），检索粒度也不同 |
+| `weaver-e9-dev` | 4 块：数据库 / 后端接口 / 前端 JSAPI / 集成扩展 | 按「开发时在写哪一层」分 |
+| `fxiaoke-dev` | 3 块 + 1 附：接入 / 对象接口 / 通用接口 / FAQ | 按「接入 → 业务对象 → 公共能力」的调用顺序分 |
+
+**两条经验**：
+
+1. **横切内容单独成块**。`weaver-e9-dev` 把「认证」抽成独立块，因为它同时被四个块引用 ——
+   塞进任何一个块都会让另外三个的读者找不到。判断标准：**如果一个主题被两个以上块引用，
+   就独立成块**（或至少在每块开头放一段摘要 + 指向权威处）。
+2. **大块要切文件**。`weaver-e9-dev` 的后端接口块有 538 个接口，切成
+   `<模块>_NN.md`（每文件 ≤30 个接口）。一个文件塞几百个接口会让检索片段失去上下文，
+   也让 diff 变得不可读。**单文件超过 ~200KB 就该考虑切分。**
+
+### 单条记录的粒度：page 还是 heading
+
+| 粒度 | 一条记录 = | 适用 | 检索体验 |
+| :--- | :--- | :--- | :--- |
+| `page` | 一篇文章 | 文档型内容（接口文档、指南） | 命中即拿到整篇，够用 |
+| `heading` | 一个标题块 | 表格型内容（「一张表 = 一个 `##` 块」） | 精确到「表」而不是「文件」，避免在几万张表的文件里捞 |
+
+`kingdee-cosmic-dev` 的数据库块就是 `heading` 粒度：22,769 张表分布在若干文件里，
+按 `## <中文名> t_<表名>` 切块，`--exact` 按表名精确命中时默认返回完整字段定义
+（否则上百字段的表被截断后会被当成完整定义）。**这条在 `knowledge.json` 里配
+`recordGranularity` 即可，不用改代码。**
 
 ---
 

@@ -1,0 +1,115 @@
+---
+name: {name}
+summary: {title} —— 由官方文档站烘焙而成的本地可检索知识库，内置统一全文检索。
+description: >-
+  {title}。内容来自 {source}，已完整抓取并转换为 Markdown，
+  可用内置统一检索脚本按关键词定位，无需逐个打开文档。
+  当需要查询该产品的接口参数、字段说明、接入流程或排错时使用。
+  检索用法：`python scripts/search.py <关键词> [--scope ...] [--full]`。
+---
+
+# {title}
+
+本 skill 是 **{source}** 的完整离线版：全站文档已批量抓取并转换为 Markdown，
+配一套统一全文检索脚本。生成工具见 `manual-baking`。
+
+> 语料抓取于 **{date}**。上游改版后重跑 `tools/fetch_manual.py` 即可增量更新。
+
+---
+
+## 一、何时用本 skill
+
+| 场景 | 去哪一块 |
+| :--- | :--- |
+{block_rows}
+
+---
+
+## 二、统一检索（核心用法）
+
+**所有内容用同一个脚本检索**，直接返回命中条目的正文，无需再打开 `.md` 文件。
+
+```bash
+PY="<你的 python3 路径>"
+"$PY" "$SKILL_DIR/scripts/search.py" <关键词...> [选项]
+```
+
+```bash
+# 按标题/名称找
+"$PY" scripts/search.py <某个接口名或文档标题>
+"$PY" scripts/search.py <关键词> --full              # 完整正文，不截断
+"$PY" scripts/search.py <关键词> --brief --limit 10  # 精简一行
+
+# 按标识符找（path 也参与检索，接口名/表名直接可用）
+"$PY" scripts/search.py <标识符> --brief
+"$PY" scripts/search.py <名称> --exact --full        # 按标题精确取定义
+
+# 浏览与精确取用
+"$PY" scripts/search.py --list --scope {first_alias}
+"$PY" scripts/search.py --path <路径或标题>
+```
+
+| 选项 | 说明 |
+| :--- | :--- |
+| `--scope S` | {scope_help}，逗号可组合，默认 `all` |
+| `--category C` | 按分类子串过滤 |
+| `--brief` | 每条只输出一行 |
+| `--full` / `-d` | 输出完整正文，不截断 |
+| `--exact` | 关键词按标题精确匹配（适合按名称取定义） |
+| `--all` | 多个关键词必须全部命中 |
+| `--limit N` / `--max N` | 返回条数 / 每条正文上限 |
+| `--list` | 只列条目，不输出正文 |
+| `--path P` | 按 path 或标题精确取一篇 |
+
+> 检索**直接读 Markdown**，不依赖预生成字典，因此不存在「改了文档忘了重建索引就搜不到」的漂移问题。
+
+---
+
+## 三、目录结构
+
+```
+{name}/
+├── SKILL.md                       # 本文件
+├── README.md
+├── knowledge.json                 # 站点配置（唯一按站点改的文件）
+├── kbkit/                         # 通用工具包（零依赖）
+├── scripts/                       # search.py / build_index.py
+├── tools/                         # fetch_manual.py / selftest.py / siteprobe.py
+├── references/                    # 语料（Markdown 是唯一真相源）
+│   └── _INDEX.md                  # 总索引（自动生成）
+└── _source/                       # 路由清单 / 抓取清单
+```
+
+---
+
+## 四、语料怎么更新
+
+```bash
+# 1) 判站点类型（改版后先跑这个）
+python tools/siteprobe.py detect {source}
+
+# 2) 重新提取路由（VuePress 站点）
+python tools/siteprobe.py routes {source} --out _source/_toc.json \
+  --blocks "{blocks_arg}"
+
+# 3) 增量抓取 / 强制重抓
+python tools/fetch_manual.py
+python tools/fetch_manual.py --force --jobs 8
+
+# 4) 重建索引
+python scripts/build_index.py
+
+# 5) 自检（--online N 抽样联网核对文本保真）
+python tools/selftest.py --online 60
+
+# 6) 查看已下线页面（只列出，不删除）
+python tools/fetch_manual.py --prune
+```
+
+---
+
+## 五、免责声明
+
+本 skill 内容整理自官方公开文档，仅供学习、对接与二次开发参考。
+接口名称、参数、返回结构与字段说明等版权归原厂商所有。
+请遵守相关许可与数据合规要求。

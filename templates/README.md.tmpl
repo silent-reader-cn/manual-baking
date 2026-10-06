@@ -1,0 +1,105 @@
+# {name}
+
+**{title}** —— 由官方文档站批量烘焙而成的本地可检索知识库，内置统一全文检索。
+
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+<!-- 抓取完成后，把下面的 0 改成实际记录数（build_index.py 会在终端打印） -->
+![Records](https://img.shields.io/badge/records-0-orange.svg)
+![Python](https://img.shields.io/badge/python-3.8%2B-3776AB.svg)
+
+> 语料来自 {source}，抓取于 **{date}**。
+
+---
+
+## 这是什么
+
+{source} 的完整离线版：全站文档抓取转换为 Markdown，用一套零依赖脚本检索。
+
+| 块 | 入口 |
+| :--- | :--- |
+{block_rows}
+
+---
+
+## 30 秒上手
+
+```bash
+PY="<你的 python3 路径>"
+
+# 不知道某个接口怎么调？直接搜，返回参数与返回结构
+"$PY" scripts/search.py <关键词>
+
+# 按标识符精确取定义（path 参与检索）
+"$PY" scripts/search.py <标识符> --brief
+
+# 按名称精确取一篇的完整正文
+"$PY" scripts/search.py <名称> --exact --full
+```
+
+只依赖 Python 3（标准库），无需安装任何第三方包。
+
+---
+
+## 检索用法
+
+```bash
+"$PY" scripts/search.py <关键词>                       # 全库检索
+"$PY" scripts/search.py <关键词> --full                # 完整正文，不截断
+"$PY" scripts/search.py <关键词> --scope {first_alias}   # 限定块
+"$PY" scripts/search.py --list --category <分类>        # 按分类浏览
+"$PY" scripts/search.py --path <路径或标题>             # 精确取一篇
+```
+
+| 选项 | 说明 |
+| :--- | :--- |
+| `--scope S` | {scope_help}，逗号可组合，默认 `all` |
+| `--category C` | 按分类子串过滤 |
+| `--brief` | 每条只输出一行 |
+| `--full` / `-d` | 输出完整正文 |
+| `--exact` | 关键词按标题精确匹配 |
+| `--all` | 多词全命中 |
+| `--limit N` / `--max N` | 返回条数 / 每条正文上限 |
+| `--list` | 只列条目 |
+| `--path P` | 按 path 或标题精确取一篇 |
+
+---
+
+## 目录结构
+
+```
+{name}/
+├── knowledge.json                 # 站点配置（唯一按站点改的文件）
+├── kbkit/                         # 通用工具包（零依赖）
+│   ├── config.py                  #   配置模型
+│   ├── corpus.py                  #   语料遍历与 frontmatter 解析
+│   ├── html2md.py                 #   通用 HTML → Markdown
+│   ├── search.py / build_index.py / selftest.py
+│   └── probe.py / fetch.py        #   站点侦察与抓取
+├── scripts/                       # search.py / build_index.py
+├── tools/                         # fetch_manual.py / selftest.py / siteprobe.py
+├── references/                    # 语料（Markdown 是唯一真相源）
+└── _source/                       # 路由清单 / 抓取清单
+```
+
+---
+
+## 语料怎么更新
+
+```bash
+python tools/siteprobe.py detect {source}       # 判站点类型
+python tools/fetch_manual.py                    # 增量抓取
+python tools/fetch_manual.py --force --jobs 8   # 强制重抓全量
+python scripts/build_index.py                   # 重建索引
+python tools/selftest.py --online 60            # 自检
+```
+
+---
+
+## 免责声明
+
+内容整理自官方公开文档，仅供学习、对接与二次开发参考，版权归原厂商所有。
+请遵守相关许可与数据合规要求。
+
+## License
+
+[MIT](./LICENSE)

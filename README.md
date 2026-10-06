@@ -29,17 +29,70 @@
 
 ## 八步流程
 
-| 步骤 | 要点 | 章节 |
-| :--- | :--- | :--- |
-| **0 定结构** | 按「块」组织 `references/`，Markdown 是唯一真相源 | [§0](./SKILL.md#0-先定结构) |
-| **1 侦察** | **先判别 SPA 还是 SSG** —— 决定是挖 JSON 接口还是直接解析 HTML | [§1](./SKILL.md#1-侦察找到-spa-背后的-json-接口) |
-| **2 抓取** | 原始响应存档、增量、重试限速、清理遗留 | [§2](./SKILL.md#2-抓取脚本的必备设计) |
-| **3 转换** | 零依赖自己写 HTML→Markdown，分清"富文本"与"结构化导出包" | [§3](./SKILL.md#3-html--markdown自己写别指望库) |
-| **4 检索** | 分层加权排序、按命中位置截断、**path 必须参与检索** | [§4](./SKILL.md#4-统一检索脚本scriptsearchpy) |
-| **5 索引** | 从 Markdown 派生 `_INDEX.md`，绝不手工维护 | [§5](./SKILL.md#5-索引脚本scriptbuild_indexpy) |
-| **6 自检** | 11 项完整性检查，证明没丢内容、检索不会静默截断 | [§6](./SKILL.md#6-自检脚本toolsselftestpy--这一步不能省) |
-| **7 收尾** | README/SKILL 写清用法与上游数据特征 | [§7](./SKILL.md#7-收尾) |
-| **8 实测** | **有凭据就一定拿真实环境跑一遍**，把文档与线上不符之处回写 | [§8](./SKILL.md#8-有凭据就实测--文档与线上几乎总有出入) |
+| 步骤 | 要点 | 对应工具 | 章节 |
+| :--- | :--- | :--- | :--- |
+| **0 定结构** | 按「块」组织 `references/`，Markdown 是唯一真相源 | `knowledge.json` | [§0](./SKILL.md#0-先定结构) |
+| **1 侦察** | **先判别 SPA 还是 SSG** —— 决定是挖 JSON 接口还是直接解析 HTML | `tools/siteprobe.py` | [§1](./SKILL.md#1-侦察找到-spa-背后的-json-接口) |
+| **2 抓取** | 原始响应存档、增量、重试限速、清理遗留 | `tools/fetch_manual.py` | [§2](./SKILL.md#2-抓取脚本的必备设计) |
+| **3 转换** | 零依赖自己写 HTML→Markdown，分清"富文本"与"结构化导出包" | `kbkit/html2md.py` | [§3](./SKILL.md#3-html--markdown自己写别指望库) |
+| **4 检索** | 分层加权排序、按命中位置截断、**path 必须参与检索** | `scripts/search.py` | [§4](./SKILL.md#4-统一检索脚本scriptsearchpy) |
+| **5 索引** | 从 Markdown 派生 `_INDEX.md`，绝不手工维护 | `scripts/build_index.py` | [§5](./SKILL.md#5-索引脚本scriptbuild_indexpy) |
+| **6 自检** | 11 项完整性检查，证明没丢内容、检索不会静默截断 | `tools/selftest.py` | [§6](./SKILL.md#6-自检脚本toolsselftestpy--这一步不能省) |
+| **7 收尾** | README/SKILL 写清用法与上游数据特征 | `templates/` | [§7](./SKILL.md#7-收尾) |
+| **8 实测** | **有凭据就一定拿真实环境跑一遍**，把文档与线上不符之处回写 | — | [§8](./SKILL.md#8-有凭据就实测--文档与线上几乎总有出入) |
+
+---
+
+## 自带工具包 `kbkit/`
+
+流程不止是文档 —— 本仓库带一套**可直接跑**的零依赖工具包。原本这些脚本在
+`weaver-e9-dev` / `kingdee-cosmic-dev` / `fxiaoke-dev` 里各有一份**已经分叉的副本**
+（同样的架构、同样的 bug 修了三四遍，站点差异却硬编码在代码里），现在收敛成一套
+**配置驱动**的实现：**站点相关的东西全进 `knowledge.json`，代码不再改**。
+
+```
+kbkit/
+├── config.py       配置模型（块/别名/排序权重/HTML 选择器）
+├── corpus.py       语料遍历 + frontmatter 解析（所有模块共用，避免漂移）
+├── html2md.py      通用 HTML → Markdown
+├── search.py       分层加权检索（path 参与打分）
+├── build_index.py  从 Markdown 派生各级 _INDEX.md
+├── selftest.py     11 项完整性自检
+├── probe.py        站点侦察：判 SPA/SSG、从 app.js 提取路由与中文层级
+└── fetch.py        并发抓取 → 转换 → 串行定路径写盘
+```
+
+### 一条命令起一个新知识库
+
+```bash
+python tools/kb_new.py ../my-kb \
+  --name my-kb --title "某某文档知识库" --source https://docs.example.com/ \
+  --blocks "/start/:01_start:快速开始:start,/api/:02_api:接口手册:api" \
+  --git
+```
+
+工具包会 **vendoring** 进新仓库（保持每个 skill 自包含，不跨仓库 import），
+并渲染 `knowledge.json` / `SKILL.md` / `README.md` / `.gitignore` / `LICENSE`。
+之后按提示走六步即可：
+
+```bash
+python tools/siteprobe.py detect <首页URL>     # 先判站点类型，别猜
+python tools/siteprobe.py routes <首页URL> --out _source/_toc.json --blocks "..."
+python tools/fetch_manual.py                   # 抓取
+python scripts/build_index.py                  # 建索引
+python tools/selftest.py --online 30           # 自检
+```
+
+### 实测验证
+
+用 `kbkit` 的通用脚本跑 `fxiaoke-dev` 的 **1,307 篇真实语料**：
+
+| 项 | 结果 |
+| :--- | :--- |
+| 索引文件数 | 255（与原专用脚本一致） |
+| 索引路径 + 数据逐条比对 | **254/255 完全一致**（唯一差异是顶层索引的链接显示文字） |
+| 检索结果 | 与原专用脚本逐条一致 |
+| 自检 | 11 项全过（含联网抽样 A2 文本保真 20/20、A3 结构守恒 0 不一致） |
 
 ---
 
@@ -86,17 +139,39 @@
 
 ---
 
+## 目录结构
+
+```
+manual-baking/
+├── SKILL.md                # 面向 AI 的执行细则（八步流程 + 踩坑清单）
+├── README.md               # 本文件（面向人的概览）
+├── kbkit/                  # 通用工具包（零依赖，可 vendoring 进任意知识库）
+├── scripts/                # search.py / build_index.py（CLI 薄封装）
+├── tools/                  # fetch_manual.py / selftest.py / siteprobe.py
+│   └── kb_new.py           #   脚手架：一条命令起一个新知识库
+└── templates/              # 新知识库骨架
+    ├── knowledge.json      #   站点配置模板（带逐项注释）
+    ├── SKILL.md.tmpl
+    ├── README.md.tmpl
+    └── gitignore.tmpl
+```
+
+---
+
 ## 安装
 
+本仓库既是**可安装的 skill**，也是**可复用的工具包**。
+
+作为 skill 安装（两套客户端都要装，否则另一个里看不到）：
+
 ```bash
-# 两套客户端都要装（否则另一个里看不到）
 git clone https://github.com/silent-reader-cn/manual-baking.git \
   ~/.workbuddy-ai/skills/manual-baking
 git clone https://github.com/silent-reader-cn/manual-baking.git \
   ~/.workbuddy/skills/manual-baking
 ```
 
-或直接把本目录复制到上述路径下。
+作为工具包使用：直接跑 `tools/kb_new.py` 生成新知识库，或把 `kbkit/` 复制进已有仓库。
 
 ---
 
