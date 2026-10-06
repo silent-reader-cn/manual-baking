@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# 本机工作状态
+.workbuddy-ai/
+.workbuddy/
+
+# 抓取时下载的站点 JS 缓存
+js/
+
+# 真实凭据一律不入库
+_local/
+credentials.json
+credentials.*.json
+.env
+.env.*
